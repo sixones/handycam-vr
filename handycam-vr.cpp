@@ -21,7 +21,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
-#include <getopt.h>
+#include <cxxopts.hpp>
 #include <sstream>
 #include <vector>
 
@@ -99,115 +99,89 @@ void showHelp(char** argv, const bool failure = false) {
 }
 
 Configuration parseConfiguration(const int argc, char** argv) {
-    static constexpr option options[] =
-    {
-        {"dir", required_argument, nullptr, 'd'},
-        {"ifo", required_argument, nullptr, 'i'},
-        {"vob", required_argument, nullptr, 'b'},
-        {"output", required_argument, nullptr, 'o'},
-        {"prefix", required_argument, nullptr, 'p'},
-        {"keep-vobs", no_argument, nullptr, 'k'},
-        {"video-encoder", required_argument, nullptr, 'e'},
-        {"video-params", required_argument, nullptr, 'r'},
-        {"audio-encoder", required_argument, nullptr, 'a'},
-        {"help", no_argument, nullptr, 'h'},
-        {"version", no_argument, nullptr, 'v'},
-        {nullptr, 0, nullptr, 0}
-    };
+    cxxopts::Options opts(argv[0] ? argv[0] : "handycam-vr");
+    opts.add_options()
+        ("d,dir",           "DVD-VR directory",       cxxopts::value<std::string>())
+        ("i,ifo",           "Path to VIDEO_RM.IFO",   cxxopts::value<std::string>())
+        ("b,vob",           "VOB file(s)",             cxxopts::value<std::vector<std::string>>())
+        ("o,output",        "Output directory",        cxxopts::value<std::string>()->default_value("."))
+        ("p,prefix",        "Output filename prefix",  cxxopts::value<std::string>()->default_value("handycam-"))
+        ("k,keep-vobs",     "Keep extracted VOBs")
+        ("e,video-encoder", "Video encoder",           cxxopts::value<std::string>()->default_value("libx264"))
+        ("r,video-params",  "Video encoder params",    cxxopts::value<std::string>()->default_value("preset=slow:crf=22"))
+        ("a,audio-encoder", "Audio encoder",           cxxopts::value<std::string>()->default_value("aac"))
+        ("h,help",          "Show help")
+        ("v,version",       "Show version");
 
-    Configuration config = {
-        .output = ".",
-        .prefix = "handycam-",
-        .keepVOBs = false
-    };
+    cxxopts::ParseResult result;
+    try {
+        result = opts.parse(argc, argv);
+    } catch (const cxxopts::exceptions::exception& e) {
+        std::cerr << "ERROR: Failed to parse arguments: " << e.what() << std::endl;
+        showHelp(argv, true);
+    }
 
-    int opt;
-    while ((opt = getopt_long(argc, argv, "d:i:b:o:p:e:r:a:khv", options, nullptr)) != -1) {
-        switch (opt) {
-            case 'd': {
-                // DVD-VR directory to use as an input
-                std::string path = optarg;
+    if (result.count("help")) {
+        showHelp(argv, false);
+    }
 
-                // Find all the VOBs.
-                for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::canonical(path) / "VIDEO_TS")) {
-                    if (entry.path().extension() == ".VOB") {
-                        config.vobPaths.push_back({
-                            .path = entry.path().string()
-                        });
-                    }
-                }
+    if (result.count("version")) {
+        std::cout << "handycam-vr: Version: " << VERSION << std::endl;
+        std::cout << "  Written by Adam Livesley <adam@sixones.com>" << std::endl;
+        std::exit(EXIT_SUCCESS);
+    }
 
-                if (!config.ifoPath.empty()) {
-                    showHelp(argv, true);
-                    return config;
-                }
+    // Show help if IFO and DIR have been specified at once.
+    if (result.count("dir") && result.count("ifo")) {
+        showHelp(argv, true);
+    }
 
-                // Find the IFO.
-                config.ifoPath = std::filesystem::canonical(path) / "VIDEO_RM" / "VIDEO_RM.IFO";
+    Configuration config;
+    config.output              = result["output"].as<std::string>();
+    config.prefix              = result["prefix"].as<std::string>();
+    config.keepVOBs            = result.count("keep-vobs") > 0;
+    config.videoEncoder        = result["video-encoder"].as<std::string>();
+    config.videoEncodingParams = result["video-params"].as<std::string>();
+    config.audioEncoder        = result["audio-encoder"].as<std::string>();
 
-                break;
+    if (result.count("dir")) {
+        // DVD-VR directory to use as an input.
+        const auto path = result["dir"].as<std::string>();
+
+        // Find all the VOBs.
+        for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::canonical(path) / "VIDEO_TS")) {
+            if (entry.path().extension() == ".VOB") {
+                config.vobPaths.push_back({ .path = entry.path().string() });
             }
-            case 'i': {
-                if (!config.ifoPath.empty()) {
-                    showHelp(argv, true);
-                    return config;
-                }
+        }
 
-                // Manually specified IFO path.
-                config.ifoPath = optarg;
-                break;
-            }
-            case 'b': {
-                // VOB paths via comma separated list.
-                if (std::string path = optarg; path.contains(",")) {
-                    std::stringstream ss(path);
-                    std::string item;
+        // Find the IFO.
+        config.ifoPath = (std::filesystem::canonical(path) / "VIDEO_RM" / "VIDEO_RM.IFO").string();
+    }
 
-                    while (std::getline(ss, item, ',')) {
-                        config.vobPaths.push_back({
-                            .path = item
-                        });
-                    }
-                } else {
-                    // Multiple params just add to the list.
-                    config.vobPaths.emplace_back(path);
+    if (result.count("ifo")) {
+        // Manually specified IFO path.
+        config.ifoPath = result["ifo"].as<std::string>();
+    }
+
+    if (result.count("vob")) {
+        // VOB paths via comma-separated list or repeated flags.
+        for (const auto& vob : result["vob"].as<std::vector<std::string>>()) {
+            if (vob.contains(",")) {
+                std::stringstream ss(vob);
+                std::string item;
+
+                while (std::getline(ss, item, ',')) {
+                    config.vobPaths.push_back({ .path = item });
                 }
-                break;
+            } else {
+                // Multiple params just add to the list.
+                config.vobPaths.emplace_back(vob);
             }
-            case 'o':
-                // Output directory.
-                config.output = optarg;
-                break;
-            case 'p':
-                // Prefix to append files with.
-                config.prefix = optarg;
-                break;
-            case 'k':
-                config.keepVOBs = true;
-                break;
-            case 'e':
-                config.videoEncoder = optarg;
-                break;
-            case 'r':
-                config.videoEncodingParams = optarg;
-                break;
-            case 'a':
-                config.audioEncoder = optarg;
-                break;
-            case 'h':
-                showHelp(argv, false);
-                break;
-            case 'v':
-                std::cout << "handycam-vr: Version: " << VERSION << std::endl;
-                std::cout << "  Written by Adam Livesley <adam@sixones.com>" << std::endl;
-                std::exit(EXIT_SUCCESS);
-            default:
-                showHelp(argv, true);
-                break;
         }
     }
 
-    config.output = std::filesystem::canonical(config.output);
+    config.output = std::filesystem::canonical(config.output).string();
 
     if (!std::filesystem::is_directory(config.output)) {
         std::filesystem::create_directory(config.output);
@@ -226,7 +200,7 @@ Configuration parseConfiguration(const int argc, char** argv) {
             std::exit(EXIT_FAILURE);
         }
 
-        size_t size = std::filesystem::file_size(path);
+        const size_t size = std::filesystem::file_size(path);
 
         const auto sectorCount = (size + SECTOR_SIZE - 1) / SECTOR_SIZE;
 
@@ -671,7 +645,7 @@ void transcodeVOB(const Configuration& config, const Clip& clip, const std::stri
                     swrContext,
                     converted,
                     outSamples,
-                    frame->extended_data,
+                    const_cast<const uint8_t**>(frame->extended_data),
                     frame->nb_samples
                 );
 
@@ -771,7 +745,7 @@ void transcodeVOB(const Configuration& config, const Clip& clip, const std::stri
                 swrContext,
                 converted,
                 outSamples,
-                frame->extended_data,
+                const_cast<const uint8_t**>(frame->extended_data),
                 frame->nb_samples
             );
 

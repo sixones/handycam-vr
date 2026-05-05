@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 23)
 
 add_executable(handycam_vr handycam-vr.cpp)
 
-find_package(PkgConfig REQUIRED)
+find_package(PkgConfig)
 if(PkgConfig_FOUND)
     pkg_check_modules(FFMPEG QUIET libavformat libavcodec libavutil libswscale libswresample)
 endif()
@@ -21,4 +21,12 @@ else()
     message(STATUS "Building without FFmpeg support")
 endif()
 
+include(FetchContent)
+FetchContent_Declare(
+        cxxopts
+        GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
+        GIT_TAG        v3.2.0
+)
+FetchContent_MakeAvailable(cxxopts)
 
+target_link_libraries(handycam_vr PRIVATE cxxopts::cxxopts)
