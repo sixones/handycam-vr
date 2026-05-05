@@ -1,0 +1,10 @@
+cmake-build*
+build/
+.idea
+.vscode
+.DS_Store
+*.o
+*.a
+*.so
+*.dylib
+handycam_vr

@@ -1,0 +1,56 @@
+# Handycam-VR
+
+Extracts clips from a DVD-VR that was recorded from a Sony Handycam, whilst it should work with others this was built
+to extract clips from the DCR-DVD203E. The extracted clips will include the recorded date and time extracted from the
+`ARI_DATA` in the VOB's, this is then appended to the filename, and included as metadata if an MP4 is produced.
+
+#### Notes
+
+Due to the way the data is positioned over multiple VOB files, the extraction works by creating .VOBs for each clip
+using the sector counts. The timestamps to indicate the timed position of each clip (or program) in the .VOBs should be
+somewhere (most likely in the IFO), but I was unable to find this in a reliable way so the extraction happens via the
+DVD sector sizes. I was also unable to find the format data, it's most likely in the `ARI_DATA` near the recorded date
+time, but I couldn't find a link between the data and what the handycam shows, so I've left this out.
+
+## Building
+
+Handycam-VR can be built with or without [FFmpeg](https://www.ffmpeg.org/), without FFmpeg the clips will be extracted
+as .VOB files, with FFmpeg these VOB files will be muxed into MP4s with H264 and AAC. To compile with FFmpeg, CMake and
+PKGConfig needs to be able to find the FFmpeg libraries from your system.
+
+```
+cmake -B build
+cmake --build build
+```
+
+## Extracting Clips
+
+There's a few ways to run to extract the clips, either give `handycam-vr` the root to the DVD-VR via `-d path/to/dvd-vr`
+or specify the path to the `.IFO` and `.VOB` files manually via `--ifo VIDEO_RM.IFO` and `--vob VTS_01_1.VOB`, for
+multiple VOBs you can specify the `--vob` parameter multiple times, or pass a comma separated list. For automatic
+extraction to work from the root of the DVD-VR, the structure should match the actual DVD-VR (with a
+`VIDEO_RM/VIDEO_RM.IFO` and `VIDEO_TS/*.VOB` folders), best to copy these to a local machine instead of reading from the
+disc directly.
+
+```
+handycam-vr -d path/to/dvd-vr
+handycam-vr -i path/to/VIDEO_RM.IFO -b VTS_01_1.VOB -b VTS_01_2.VOB
+handycam-vr --ifo path/to/VIDEO_RM.IFO --vob VTS_01_1.VOB --vob VTS_01_2.VOB
+handycam-vr --ifo path/to/VIDEO_RM.IFO --vob VTS_01_1.VOB,VTS_01_2.VOB --keep-vobs --video-encoder libx264
+```
+
+When FFmpeg is included, the VOB files will transcode into MP4's and the VOB files will be deleted, to keep them
+specify `--keep-vobs` as an argument.
+
+Custom prefix for the generated VOB and MP4's can be specified with `--prefix handycam-`, it will default to `handycam-`
+when not specified, and the full format of the filenames will be `prefix-clipnum-YYYYMMDD-HHMMSS`. The output directory
+will default to the current directory, but can be changed with `--output path/to/output`.
+
+When using FFmpeg, you can customise the video encoder with `--video-encoder`, this defaults to `libx264`, you can also
+specify video encoding params with `--video-params` with a default of `preset=slow:crf=22`. This is passed to FFmpeg
+via `av_opt_set_from_string` with a key value separator of `=` and pair separator of `:`. Audio encoder can be changed
+by using `--audio-encoder`, by default it uses `aac`.
+
+## License
+
+Licensed under GNU v3, see [COPYING](COPYING.mdown)
